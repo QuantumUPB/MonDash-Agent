@@ -1,0 +1,3 @@
+[submodule "qkd_benchmark"]
+	path = qkd_benchmark
+	url = git@github.com:QuantumUPB/QKD-Tester.git
