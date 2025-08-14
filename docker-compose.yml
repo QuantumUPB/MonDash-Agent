@@ -1,0 +1,10 @@
+version: '3.9'
+services:
+  agent:
+    build: .
+    environment:
+      - POLL_INTERVAL=${POLL_INTERVAL:-60}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["python", "mondash-agent.py"]
+    network_mode: host

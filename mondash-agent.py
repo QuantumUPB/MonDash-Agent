@@ -1,106 +1,108 @@
 import asyncio
-import aiohttp
 import json
 import os
-import time
+import logging
+from typing import List
 
-from qkd_benchmark.benchmarkdan import QKD_Benchmark
+import aiohttp
+import yaml
+from dotenv import load_dotenv
 
-def parse_log_file(log_file_path):
-    if not os.path.exists(log_file_path):
-        return []
+from service_client import KeyServiceClient, NodeConfig, NodeStatus
+from base_poller import BasePoller
 
-    log_entries = []
-    with open(log_file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                log_entries.append(line)
-    return log_entries
+load_dotenv()
 
-async def periodic_aggregate_and_send(qkd_benchmark, aggregator_url, interval=10):
-    """
-    Periodically reads the log file to gather benchmark results, fetches path statuses,
-    and sends a JSON payload to an external server.
-    """
-    while True:
-        print(f"[INFO] Running benchmark at {time.strftime('%X')} ...")
-        # This will create a new benchmark log file each time you instantiate
-        # QKD_Benchmark (due to the timestamp in __init__).
-        await qkd_benchmark.run_benchmark("w")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+logger = logging.getLogger(__name__)
 
-        print("[INFO] Benchmark execution finished.")
-        print(f"[INFO] Aggregating results at {time.strftime('%X')} ...")
+POST_RESULTS = os.environ.get("POST_RESULTS", "false").lower() == "true"
+RESULTS_URL = os.environ.get("RESULTS_URL", "")
+AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "")
 
-        # 1) Parse the latest log file from QKD_Benchmark
-        keyrates = parse_log_file(qkd_benchmark.benchmark_log_file)
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))
+CONFIG_FILE = os.environ.get("CONFIG_FILE", "config.yaml")
 
-        async with aiohttp.ClientSession() as session:
-            # 2) Collect the latest statuses
-            status_map = {}
-            for path in qkd_benchmark.paths:
-                status = await qkd_benchmark.get_status_path(path, session)
-                key = f"{path['source']['SAE']} -> {path['destination']['SAE']}"
-                status_map[key] = status
 
-            # Build the aggregated data as a dictionary (or any structure) 
-            payload = {
-                "timestamp": time.time(),
-                "keyrates": keyrates,
-                "path_statuses": status_map
+def load_config(path: str) -> List[NodeConfig]:
+    logger.info("Loading configuration from %s", path)
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    names = data.get("names", [])
+    consumers = data.get("consumers", [])
+    urls = data.get("urls", {})
+    paths = data.get("paths", {})
+
+    nodes: List[NodeConfig] = []
+
+    if paths:
+        for src_name, consumer_map in paths.items():
+            url = urls.get(src_name, "")
+            for src_consumer, dests in consumer_map.items():
+                for dest_kme, dest_consumer in dests:
+                    sae_id = f"{src_name}-{dest_consumer}"
+                    nodes.append(
+                        NodeConfig(
+                            name=src_name,
+                            base_url=url,
+                            kme=dest_kme,
+                            consumer=dest_consumer,
+                            sae_id=sae_id,
+                        )
+                    )
+    else:
+        for name in names:
+            url = urls.get(name, "")
+            for consumer in consumers:
+                nodes.append(
+                    NodeConfig(name=name, base_url=url, kme=name, consumer=consumer)
+                )
+
+    logger.info("Loaded %d node configurations", len(nodes))
+    return nodes
+
+
+async def monitor(nodes: List[NodeConfig]):
+    logger.info("Monitor started for %d nodes", len(nodes))
+    async with aiohttp.ClientSession() as session:
+        client: BasePoller[NodeStatus] = KeyServiceClient(nodes, session)
+        while True:
+            statuses: List[NodeStatus] = await client.poll()
+            unified = {
+                "nodes": [
+                    {
+                        "name": s.name,
+                        "status": s.status,
+                        "stored_key_count": s.stored_key_count,
+                        "current_key_rate": s.current_key_rate,
+                    }
+                    for s in statuses
+                ]
             }
+            if POST_RESULTS and RESULTS_URL:
+                headers = {"X-Auth-Token": f"Bearer {AUTH_TOKEN}"} if AUTH_TOKEN else {}
+                logger.debug("POST %s headers=%s", RESULTS_URL, list(headers.keys()))
+                try:
+                    async with session.post(RESULTS_URL, json=unified, headers=headers) as resp:
+                        resp.raise_for_status()
+                except Exception as exc:
+                    print(f"Error posting results: {exc}")
+            logger.debug(json.dumps(unified, indent=2))
+            await asyncio.sleep(POLL_INTERVAL)
 
-            # 3) Send to aggregator server
-            try:
-                async with session.post(aggregator_url, json=payload) as resp:
-                    if resp.status == 200:
-                        print("[INFO] Successfully sent aggregated data.")
-                    else:
-                        print("[WARN] Failed to send aggregated data, status:", resp.status)
-            except Exception as e:
-                print("[ERROR] Exception while sending data:", e)
 
-        await asyncio.sleep(interval)
+def main() -> None:
+    logger.info("Starting MonDash agent")
+    logger.debug("Poll interval set to %d seconds", POLL_INTERVAL)
+    if POST_RESULTS and RESULTS_URL:
+        logger.debug("Results will be posted to %s", RESULTS_URL)
+    nodes = load_config(CONFIG_FILE)
+    if not nodes:
+        raise SystemExit("No nodes configured")
+    asyncio.run(monitor(nodes))
 
-###############################################################################
-# 3. Main entry point
-###############################################################################
-async def main():
-    # --------------------------------------------------------------------------
-    # 1) Load your static_data and topology_data
-    # --------------------------------------------------------------------------
-    with open('static_data.json', 'r') as f:
-        static_data = json.load(f)
-    with open('topology_data.json', 'r') as f:
-        topology_data = json.load(f)
 
-    # --------------------------------------------------------------------------
-    # 2) Directories for certificates/experiments
-    # --------------------------------------------------------------------------
-    certificates_dir = "./certs"  
-    experiment_dir = "./experiments"
-    os.makedirs(certificates_dir, exist_ok=True)
-    os.makedirs(experiment_dir, exist_ok=True)
-
-    # --------------------------------------------------------------------------
-    # 3) Instantiate QKD_Benchmark
-    #
-    #    Note: Because QKD_Benchmark sets self.benchmark_log_file using the
-    #    current timestamp, it will generate a new log file each time you run
-    #    this script. If you want to append to the same file, modify the class.
-    # --------------------------------------------------------------------------
-    qkd_benchmark = QKD_Benchmark(
-        static_data=static_data,
-        topology_data=topology_data,
-        certificates_dir=certificates_dir,
-        experiment_dir=experiment_dir,
-        bidirectional=True
-    )
-
-    aggregator_url = "https://example.com/aggregator"  # Replace with real endpoint
-    task_aggregate = asyncio.create_task(periodic_aggregate_and_send(qkd_benchmark, aggregator_url, interval=60))
-
-    await asyncio.gather(task_aggregate)
-
-if _name_ == '_main_':
-    asyncio.run(main())
+if __name__ == "__main__":
+    main()

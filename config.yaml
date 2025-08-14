@@ -1,0 +1,63 @@
+names:
+  - precisA
+  - precisB
+  - rectorat
+  - campus
+urls:
+  precisA: http://localhost:6600
+  precisB: http://localhost:6600
+  rectorat: http://localhost:6600
+  campus: http://localhost:6600
+consumers:
+  - fileTransfer1
+  - fileTransfer2
+  - qkdGkt
+  - vault1
+  - vpn1
+paths:
+  campus:
+    fileTransfer1:
+      - [precisA, fileTransfer1]
+      - [rectorat, fileTransfer1]
+    fileTransfer2:
+      - [precisA, fileTransfer2]
+    qkdGkt:
+      - [precisA, qkdGkt]
+    vault1:
+      - [precisA, vault1]
+      - [rectorat, vault1]
+  precisA:
+    fileTransfer1:
+      - [campus, fileTransfer1]
+    fileTransfer2:
+      - [campus, fileTransfer2]
+    qkdGkt:
+      - [campus, qkdGkt]
+    vault1:
+      - [campus, vault1]
+  precisB:
+    fileTransfer1:
+      - [rectorat, fileTransfer1]
+    vault1:
+      - [rectorat, vault1]
+    vpn1:
+      - [rectorat, vpn1]
+  rectorat:
+    fileTransfer1:
+      - [precisB, fileTransfer1]
+      - [campus, fileTransfer1]
+    vault1:
+      - [precisB, vault1]
+      - [campus, vault1]
+    vpn1:
+      - [precisB, vpn1]
+links:
+  - [campus, precisA, 14000]
+  - [precisB, rectorat, 11000]
+key_parameters:
+  default_key_size: 256
+  max_key_count: 100
+  max_key_per_request: 10
+  max_key_size: 324
+  min_key_size: 128
+  max_SAE_ID_count: 0
