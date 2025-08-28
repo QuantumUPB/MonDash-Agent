@@ -92,3 +92,11 @@ make docker
 The container is configured with `network_mode: host` so it shares the host's
 network stack. This allows the agent to reach services bound to localhost on
 the host machine.
+
+# Copyright and license
+
+This work has been implemented by Bogdan-Calin Ciobanu and Alin-Bogdan Popa under the supervision of prof. Pantelimon George Popescu, within the Quantum Team in the Computer Science and Engineering department,Faculty of Automatic Control and Computers, National University of Science and Technology POLITEHNICA Bucharest (C) 2024. In any type of usage of this code or released software, this notice shall be preserved without any changes.
+
+If you use this software for research purposes, please follow the instructions in the "Cite this repository" option from the side panel.
+
+This work has been partly supported by RoNaQCI, part of EuroQCI, DIGITAL-2021-QCI-01-DEPLOY-NATIONAL, 101091562.
