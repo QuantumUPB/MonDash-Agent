@@ -1,5 +1,10 @@
 # MonDash Agent
 
+<p float="left">
+    <img src="upb.png" alt="University Politehnica of Bucharest" width="50"/>
+    <img src="Logo.png" alt="Quantum Team @ UPB" width="100"/>
+</p>
+
 MonDash periodically polls a set of key management nodes and prints their
 aggregated status as JSON. Endpoints and node information are defined in a YAML
 configuration file. Each node's availability is queried from
